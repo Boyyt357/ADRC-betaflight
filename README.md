@@ -7,6 +7,9 @@ This repository implements **Active Disturbance Rejection Control (ADRC)** on Be
 ---
 
 ## For more Info
+
+<img width="2752" height="1536" alt="Gemini_Generated_Image_ug0arsug0arsug0a" src="https://github.com/user-attachments/assets/c3ce294c-ba1f-498c-a88b-c4860ff037eb" />
+
 https://youtu.be/BLTQN-Gw7LE
 
 ---
