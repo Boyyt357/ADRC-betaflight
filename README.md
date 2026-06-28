@@ -8,9 +8,7 @@ This repository implements **Active Disturbance Rejection Control (ADRC)** on Be
 
 ## For more Info
 
-<img width="2752" height="1536" alt="Gemini_Generated_Image_ug0arsug0arsug0a" src="https://github.com/user-attachments/assets/c3ce294c-ba1f-498c-a88b-c4860ff037eb"(https://youtu.be/BLTQN-Gw7LE) />
-
-
+[![ARDC Betaflight](https://img.youtube.com/vi/BLTQN-Gw7LE/0.jpg)](https://www.youtube.com/watch?v=BLTQN-Gw7LE)
 
 ---
 
@@ -30,8 +28,66 @@ Instead of standard Proportional, Integral, and Derivative gains, this implement
 | **I** | **Observer Bandwidth** | Controls the speed of the Extended State Observer (ESO). It dictates how fast the controller estimates and cancels external forces (e.g., wind, prop wash). *Note: Setting this too high can amplify gyro noise and heat up motors.* |
 | **D** | **System Gain** | Informs the controller how powerful the motors are based on acceleration and KV rating. Decreasing this increases overall gain (for fast-accelerating motors); increasing it decreases overall gain (for smoother control). |
 
+It is **highly recommended** to set PID in betaflight to off at minimum throttle in case the initial ARDC parameters are incorrect for your drone. Otherwise it may behave unpredictably on arm while adjusting parameters. To do this go to the command line interface (CLI) in betaflight and run the following command
+```
+set pid_at_mid_throttle = off
+```
+### Example Parameters
+| Drone type | Control Bandwidth | Observer Bandwidth | System Gain |
+| :---: | :--- | :--- | :--- |
+| 10" Drone | 10 | 50 | 20 |
+| 5" Drone | 10 | 110 | 100 |
+
+Control Bandwidth (P)  = 10, Observer Bandwidth (I) = 110, System Gain (I) = 100.
+
 ---
 
+## Compiling ARDC-Betaflight
+Compiles using the same procedure as standard Betaflight detailed [here](https://betaflight.com/docs/category/building)
+
+It is also possible to build it on an ARM system (like a Raspberry Pi) with the following instructions (there's probably no good reason to do this). Tested on a Raspberry Pi 3B running Raspbian Trixie 13.5
+1) Update system and install toolchain
+```
+sudo apt update
+sudo apt upgrade
+sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+```
+2) Clone ADRC-Betaflight
+```
+git clone https://github.com/Boyyt357/ADRC-betaflight 
+```
+3) Change to ARDC-betaflight directory
+```
+cd ARDC-betaflight
+```
+4) Modify betaflight tools.mk file
+```
+nano mk/tools.mk
+```
+5) Comment out line 43:   
+```
+# $(error No toolchain URL defined for $(HOST_OS)-$(HOST_ARCH). Stop.)
+```
+6) Save and exit (ctrl+x, enter)
+7) Check installed compiler version to be used for compilation;  double check to see that it's installed properly
+```
+arm-none-eabi-gcc -dumpversion
+```
+8) Append local configuraion override to mk/local.mk
+```
+echo "GCC_REQUIRED_VERSION = $(arm-none-eabi-gcc -dumpversion)" >> mk/local.mk
+```	
+9) Compile firmware:
+```
+make clean
+make configs
+```
+10) Make firmware for whatever target board. For a DAKEFPVF405 for example, this would be:
+```
+make DAKEFPVF405
+```
+
+---
 
 ## Hardware Issues
 
