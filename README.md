@@ -12,7 +12,8 @@ This repository implements **Active Disturbance Rejection Control (ADRC)** on Be
 > observer feedback, ADRC-tuned defaults, zero-throttle observer handling, plus one
 > experimental change). **They are UNTESTED on real hardware.** Each fix is its own commit so
 > you can build with or without any of them (`git revert <sha>`). Details and rationale in
-> [`ADRC_FIXES.md`](ADRC_FIXES.md). If you fly it, **please report results in the issues** —
+> [`ADRC_FIXES.md`](ADRC_FIXES.md). If you fly it, **please report in
+> [issue #1 — Call for flight testers](https://github.com/danusha2345/ADRC-betaflight/issues/1)** —
 > what you flew, which commits, and how it behaved. 🙏
 
 ---
@@ -55,42 +56,59 @@ set pid_at_min_throttle = off
 ---
 
 ## Compiling ADRC-Betaflight
-Compiles using the same procedure as standard Betaflight, detailed [here](https://betaflight.com/docs/category/building).
-
-It is also possible to build it on an ARM system (like a Raspberry Pi) — there's probably no good reason to do this. Tested on a Raspberry Pi 3B running Raspbian Trixie 13.5:
-
-1) Update the system and install the toolchain
+Compiles exactly like standard Betaflight (full docs [here](https://betaflight.com/docs/category/building)). On a normal x86_64 Linux / macOS / WSL host:
 ```
-sudo apt update
-sudo apt upgrade
+git clone https://github.com/danusha2345/ADRC-betaflight
+cd ADRC-betaflight
+make arm_sdk_install   # one-time: downloads the pinned arm-none-eabi GCC (13.3.1)
+make configs           # one-time: hydrate the board configs submodule
+make DAKEFPVF405       # build your target — replace DAKEFPVF405 with your board
+```
+The `.hex` lands in `obj/`. (Verified: builds clean for `DAKEFPVF405` / STM32F405 with GCC 13.3.1.)
+
+<details>
+<summary>Building on an ARM host (e.g. Raspberry Pi)</summary>
+
+The toolchain `make arm_sdk_install` fetches is x86_64-only, so on an ARM host use the system toolchain instead. Tested on a Raspberry Pi 3B running Raspbian Trixie 13.5:
+
+1) Install the toolchain
+```
+sudo apt update && sudo apt upgrade
 sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
 ```
-2) Clone ADRC-Betaflight
+2) Clone and enter the repo
 ```
-git clone https://github.com/Boyyt357/ADRC-betaflight
-```
-3) Change into the ADRC-betaflight directory
-```
+git clone https://github.com/danusha2345/ADRC-betaflight
 cd ADRC-betaflight
 ```
-4) Comment out the `$(error No toolchain URL defined ...)` line in `mk/tools.mk` (line 43)
-5) Check the installed compiler version (confirm it installed properly)
-```
-arm-none-eabi-gcc -dumpversion
-```
-6) Append a local configuration override to `mk/local.mk`
+3) Comment out the `$(error No toolchain URL defined ...)` line in `mk/tools.mk` (line 43) so the build uses the system toolchain instead of downloading one.
+4) Point the build at the system compiler version
 ```
 echo "GCC_REQUIRED_VERSION = $(arm-none-eabi-gcc -dumpversion)" >> mk/local.mk
 ```
-7) Build the firmware:
+5) Hydrate configs and build
 ```
-make clean
 make configs
-```
-8) Build for your target board (a DAKEFPVF405, for example):
-```
 make DAKEFPVF405
 ```
+</details>
+
+---
+
+## 🧪 Help test these fixes — testers wanted!
+
+This fork's ADRC robustness fixes (see [`ADRC_FIXES.md`](ADRC_FIXES.md)) are **UNTESTED on real hardware** — the code builds clean but has never flown. If you have a craft you can safely test on, please help validate them.
+
+**How to help:**
+1. Build the fork (see *Compiling* above). Each fix is a separate commit, so you can `git revert <sha>` to build with or without any one of them.
+2. Test safely — **props off first**, then an open area away from people.
+3. Report in **[issue #1 — Call for flight testers](https://github.com/danusha2345/ADRC-betaflight/issues/1)**, including:
+   - Craft (size, weight, motors/props, FC target) and your ADRC P/I/D (wc/wo/b0).
+   - Which commits you built with (or "all").
+   - Behavior: arm/spool-up, hover, hard maneuvers, prop wash, wind, recovery after throttle chops, any oscillation or motor heating.
+   - A blackbox log if you can grab one.
+
+Even a quick "flew fine on a 5\" with all fixes" or "got oscillation on yaw" is hugely useful. Thank you! 🙏
 
 ---
 
