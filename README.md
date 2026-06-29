@@ -4,6 +4,8 @@
 
 # Betaflight ADRC Controller (Active Disturbance Rejection Control)
 
+**English** | [Русский](README.ru.md)
+
 This repository implements **Active Disturbance Rejection Control (ADRC)** on Betaflight, completely replacing the traditional PID loop. ADRC acts as a "PID Killer"—providing incredible stability, robust wind resistance, and smooth handling even with uncalibrated parameters, changing propeller sizes, or extreme, unbalanced dynamic payloads.
 
 > ⚠️ **Experimental robustness fixes on this fork — flight testers wanted!**
