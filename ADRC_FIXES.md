@@ -1,5 +1,7 @@
 # ADRC robustness fixes — call for flight testers
 
+**English** | [Русский](ADRC_FIXES.ru.md)
+
 This fork adds a series of **small, independent** robustness fixes on top of
 [`Boyyt357/ADRC-betaflight`](https://github.com/Boyyt357/ADRC-betaflight). They came out of a
 line-by-line review of the ADRC implementation in `src/main/flight/pid.c` against ADRC/LADRC
