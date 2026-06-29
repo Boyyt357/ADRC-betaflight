@@ -10,8 +10,7 @@ This repository implements **Active Disturbance Rejection Control (ADRC)** on Be
 
 ## For more Info
 
-<img width="2752" height="1536" alt="1T" src="https://github.com/user-attachments/assets/0e7b9a59-aff6-4e84-ac83-92dbd45ac3cc" />
-https://youtu.be/BLTQN-Gw7LE
+[![ADRC Betaflight](https://img.youtube.com/vi/BLTQN-Gw7LE/0.jpg)](https://www.youtube.com/watch?v=BLTQN-Gw7LE)
 
 
 
@@ -33,8 +32,58 @@ Instead of standard Proportional, Integral, and Derivative gains, this implement
 | **I** | **Observer Bandwidth** | Controls the speed of the Extended State Observer (ESO). It dictates how fast the controller estimates and cancels external forces (e.g., wind, prop wash). *Note: Setting this too high can amplify gyro noise and heat up motors.* |
 | **D** | **System Gain** | Informs the controller how powerful the motors are based on acceleration and KV rating. Decreasing this increases overall gain (for fast-accelerating motors); increasing it decreases overall gain (for smoother control). |
 
+It is **highly recommended** to disable PID at minimum throttle in case the initial ADRC parameters are incorrect for your drone — otherwise it may behave unpredictably on arm while you adjust parameters. In the Betaflight command line interface (CLI) run:
+```
+set pid_at_min_throttle = off
+```
+
+### Example Parameters
+| Drone type | Control Bandwidth (P) | Observer Bandwidth (I) | System Gain (D) |
+| :--- | :---: | :---: | :---: |
+| 10" drone (author's video) | 10 | 50 | 20 |
+| 5" drone (jmsweng) | 10 | 110 | 100 |
+
 ---
 
+## Compiling ADRC-Betaflight
+Compiles using the same procedure as standard Betaflight, detailed [here](https://betaflight.com/docs/category/building).
+
+It is also possible to build it on an ARM system (like a Raspberry Pi) — there's probably no good reason to do this. Tested on a Raspberry Pi 3B running Raspbian Trixie 13.5:
+
+1) Update the system and install the toolchain
+```
+sudo apt update
+sudo apt upgrade
+sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+```
+2) Clone ADRC-Betaflight
+```
+git clone https://github.com/Boyyt357/ADRC-betaflight
+```
+3) Change into the ADRC-betaflight directory
+```
+cd ADRC-betaflight
+```
+4) Comment out the `$(error No toolchain URL defined ...)` line in `mk/tools.mk` (line 43)
+5) Check the installed compiler version (confirm it installed properly)
+```
+arm-none-eabi-gcc -dumpversion
+```
+6) Append a local configuration override to `mk/local.mk`
+```
+echo "GCC_REQUIRED_VERSION = $(arm-none-eabi-gcc -dumpversion)" >> mk/local.mk
+```
+7) Build the firmware:
+```
+make clean
+make configs
+```
+8) Build for your target board (a DAKEFPVF405, for example):
+```
+make DAKEFPVF405
+```
+
+---
 
 ## Hardware Issues
 
