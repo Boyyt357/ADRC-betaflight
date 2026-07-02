@@ -28,7 +28,7 @@ legacy Betaflight plumbing.
 | #1 anti-windup | `add anti-windup clamp on the ESO disturbance estimate z3` | Bounds z3 so the disturbance term `z3/b0` stays within the per-axis pidsum limit; prevents lag in recovery after motor saturation. | Medium |
 | #2 observer feedback | `feed the ESO the saturation-limited command` | The ESO `b0*u` term now uses the pidsum clamped to the per-axis limit (what the plant can actually apply) instead of the raw pre-saturation pidsum. | Medium |
 | #4 zero-throttle | `keep the ESO running at zero throttle` | At zero throttle (no airmode) the observer was reset every loop; now it keeps integrating and only the legacy I accumulator is cleared, so the disturbance estimate survives spool-up. Genuine disarm/overflow still fully resets. | Medium |
-| #5 core-only feedback | `EXPERIMENTAL — feed ESO only the ADRC core (exclude F/S)` | Feeds the observer only P+I+D, excluding feedforward F and S-term (which aren't /b0). **Debatable** — F/S are applied to the plant too. Revert this single commit to restore #2 behavior; fly both back-to-back. | High / uncertain |
+| #5 core-only feedback | `EXPERIMENTAL — feed ESO only the ADRC core (exclude F/S)` | Feeds the observer only P+I+D, excluding feedforward F and S-term (which aren't /b0). **Reverted on master 2026-07-02** after the hardware A/B below showed #2 flies the same or slightly better — the default build is now the #2 behavior. To try #5 anyway: `git cherry-pick 0d43645`. | High / uncertain |
 | #6 gain ceiling | `raise the PID gain ceiling to the uint8_t max (255)` | The System-Gain (D → b0) input was capped at 250 by the legacy `PID_GAIN_MAX`; on fast motors the tune can need more. Raised to 255 (the hard uint8_t ceiling). Only widens the allowed range — no behavior change at existing values. Going above 255 would need a wider field (breaks MSP/blackbox). | Low (range only) |
 | #7a anti-gravity | `EXPERIMENTAL — disable anti-gravity P-boost under ADRC` | Anti-gravity (on by default) multiplies the roll/pitch P-term during throttle transients — a legacy PID heuristic. ADRC already rejects throttle-sag torque via the observer (z3), so the boost just adds a transient overshoot at spool-up/takeoff (a likely extra cause of the takeoff bounce). Boost still logged for study; revert to A/B. | High / uncertain |
 | #7b observer log | `add DEBUG_ADRC blackbox logging of the ESO states` | New `debug_mode = ADRC`: logs the observer states so testers can actually see them — roll z1/z2/z3 (debug 0–2), pitch z1/z2/z3 (3–5), yaw z3 (6), pitch b0 (7). Diagnostic only, no flight-behavior change. | None (logging) |
@@ -40,7 +40,7 @@ git revert <sha>           # drop one fix (creates a revert commit)
 # then build as usual: make <TARGET>   (see README "Compiling ADRC-Betaflight")
 ```
 
-## Known real-world feedback (as of June 2026)
+## Known real-world feedback (as of July 2026)
 
 Real-flight evidence for the ADRC-Betaflight fork is currently very thin (the fork is only days old). Collected here so the picture stays honest:
 
@@ -54,6 +54,16 @@ Real-flight evidence for the ADRC-Betaflight fork is currently very thin (the fo
   - **Disturbance rejection confirmed hands-on:** he could set the quad down and balance it on a single motor and it stayed stable (⚠️ he cut himself doing this — do not attempt near a spinning 5").
   - **Chattering at the gain ceiling:** at D=250 (b0=2500) he still heard occasional chatter, and lowering the gain made it worse. He hit the old 250 cap wanting ~263 for the faster motors. Fix **#6** raises the ceiling to 255; beyond that the real lever is re-tuning observer bandwidth (I/wo) / gyro filtering for the new motor vibration, not more gain.
   - Zero-throttle "sticks at the last attitude it touched down at" — expected side effect of keeping the ESO alive (fix #4); jmsweng considers it a harmless ADRC quirk.
+- **✈️ Airfield tests (2026-07-01, [issue #1](https://github.com/danusha2345/ADRC-betaflight/issues/1)) — jmsweng**, now on the full fix stack including **#7a** (anti-gravity off), re-tuned to **30/100/200** on the 1750 kV setup. Verdict: *"In its current state, this method seems to be superior to PID control."*
+  - **Wind rejection felt in flight:** the quad noticeably did not drift when the wind picked up (consistent with the earlier leaf-blower test).
+  - **~20% AUW hung off motor 4:** flyable but "handles like crap"; blackbox shows motor 4 pinned at max output for a large share of the flight — a **thrust-ceiling limit, not a control limit**.
+  - **Prop-damage tolerance:** a crash severely bent two props → flew back normally, only the noise gave it away. He then **cut one blade off** prop 2 (plus two bent blades on prop 3) and it *still* flew acceptably, until vibration loosened the arm screws and ejected the arm.
+  - Residual takeoff oscillations are still visible in blackbox even with #7a, but no longer visible/audible in person. He keeps #7a: anti-gravity duplicates what the observer already does.
+  - He also proposed picking tunes **quantitatively** from the variance of the takeoff/hover blackbox traces — plots of the same maneuver under different tunes separate clearly.
+- **🔬 Maintainer blackbox analysis (2026-07-02)** of the logs above (charts in [`docs/flight-test-analysis/`](docs/flight-test-analysis/)):
+  - **The takeoff bounce tracks z3 windup on the ground.** In the four-tune takeoff A/B, tunes where pitch z3 (the I-term) wound up to ~+65…+90 during spool-up bounced (pitch tracking-error RMS 13–19 deg/s in the first airborne second); tunes where z3 stayed ≈0 took off clean (RMS 3–5 deg/s). Single-run data, but it localizes the mechanism: while the craft is ground-constrained the ESO mis-attributes thrust to a phantom disturbance, which then has to unwind at liftoff. → strongest candidate for the next fix: ground-transient handling of z3 (gate or slew-limit it until liftoff is detected).
+  - **Load flight:** motor 4 at ≥99% output ~12% of the flight — confirms the power-limit reading.
+  - **Prop-damage flight:** unfiltered-gyro vibration PSD ~20× the intact-prop flight across the band, whole-flight tracking-error RMS ~3.7× higher — and still controllable. A strong disturbance-rejection data point.
 
 **No wider traction yet:** no Reddit / RCGroups / IntoFPV / blog threads on this fork, and the official Betaflight project has zero ADRC mentions (issues/PRs/discussions).
 
