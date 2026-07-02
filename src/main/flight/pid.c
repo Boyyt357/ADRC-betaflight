@@ -1400,13 +1400,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         // Clamp to the per-axis pidsum limit so the ESO is fed the command that can
         // actually reach the plant, instead of absorbing mixer clipping as a fake disturbance.
         const float adrcOutLimit = (axis == FD_YAW) ? PIDSUM_LIMIT_YAW : PIDSUM_LIMIT;
-        // EXPERIMENTAL (see ADRC_FIXES.md): feed the ESO only the ADRC core
-        // command (P+I+D), excluding feedforward F and the S-term, which are not divided by
-        // b0 and would otherwise enter z2/z3 scaled by b0. DEBATABLE: F/S are applied to the
-        // plant too, so the observer arguably should see them. Revert this commit to feed the
-        // full clamped pidsum (the #2 behavior) for A/B comparison.
-        const float adrcCoreCmd = pidData[axis].P + pidData[axis].I + pidData[axis].D;
-        pidRuntime.adrc_lastOutput[axis] = constrainf(adrcCoreCmd, -adrcOutLimit, adrcOutLimit);
+        pidRuntime.adrc_lastOutput[axis] = constrainf(pidData[axis].Sum, -adrcOutLimit, adrcOutLimit);
     }
 
 #ifdef USE_WING
