@@ -44,6 +44,29 @@ Instead of standard Proportional, Integral, and Derivative gains, this implement
 | **I** | **Observer Bandwidth** | Controls the speed of the Extended State Observer (ESO). It dictates how fast the controller estimates and cancels external forces (e.g., wind, prop wash). *Note: Setting this too high can amplify gyro noise and heat up motors.* |
 | **D** | **System Gain** | Informs the controller how powerful the motors are based on acceleration and KV rating. Decreasing this increases overall gain (for fast-accelerating motors); increasing it decreases overall gain (for smoother control). |
 
+### Where to enter the values (Betaflight Configurator, PID Tuning tab)
+
+There is no separate "ADRC" screen — you type the ADRC parameters into the **ordinary P / I / D cells** of the PID Tuning tab, per axis, exactly where PID gains normally live:
+
+| Axis | **P** cell → Control Bandwidth (ω_c) | **I** cell → Observer Bandwidth (ω_o) | **D** cell → System Gain (b0 ÷ 10) |
+| :--- | :---: | :---: | :---: |
+| ROLL | 30 | 100 | 200 |
+| PITCH | 30 | 100 | 200 |
+| YAW | 30 | 80 | 200 |
+
+*(example values = the community 5" tune below; the firmware defaults are 10 / 110 / 100 for roll & pitch and 10 / 80 / 100 for yaw — yaw runs a slightly lower observer bandwidth by default)*
+
+Two things to know before you hit Save:
+
+1. **Switch the Simplified Tuning sliders OFF first** (PID Tuning tab → slider mode → OFF / expert mode). If the sliders are active, the Configurator recomputes the P/I/D cells from the sliders on save and silently overwrites your ADRC values. For the same reason, don't touch the *Master multiplier* — under ADRC, scaling all cells together is meaningless.
+2. The other fields keep (or lose) their meaning as follows:
+   - **Feedforward (F)** — unchanged: still the standard Betaflight stick feedforward, applied on top of ADRC. Keep the defaults.
+   - **D Max** — ignored (ADRC reads only the D cell, as System Gain).
+   - **TPA** — effectively inert (it scales the legacy Kp/Kd coefficients, which ADRC does not use).
+   - **Anti-gravity / I-term relax / I-term rotation** — legacy PID helpers; ADRC recomputes its I-term from the observer every loop, so they don't apply (the anti-gravity P-boost is explicitly disabled in this fork — fix #7a).
+
+CLI equivalent, if you prefer it over the GUI: `set p_roll = 30`, `set i_roll = 100`, `set d_roll = 200` (same for `_pitch` / `_yaw`), then `save`.
+
 It is **highly recommended** to disable PID at minimum throttle in case the initial ADRC parameters are incorrect for your drone — otherwise it may behave unpredictably on arm while you adjust parameters. In the Betaflight command line interface (CLI) run:
 ```
 set pid_at_min_throttle = off
@@ -65,7 +88,7 @@ A sensible step-by-step instead of guessing, starting from `10 / 50 / 20` (P/I/D
 
 Example end state on a 5" (640 g, DAKEFPVF405, 4S, 2300 kV, Gemfan Hurricane 51433-3): **40 / 160 / 200** — in tests this resisted a leaf-blower and being hit with a stick mid-air, and flew with 20–40% of AUW hung off one motor arm. On faster/lighter setups scale System Gain roughly with kV·mass. The System Gain (D) input maxes out at **255** in this fork (raised from 250); if you need more, chattering usually means the Observer Bandwidth (I) / gyro filtering needs retuning rather than more gain.
 
-**Refinement (blackbox method):** after swapping to 1750 kV motors jmsweng re-tuned by comparing blackbox traces of the same takeoff+hover under several candidate tunes and picking the one with the least oscillation — ending at **30 / 100 / 200**. Maintainer analysis of those logs confirms the separation is real (takeoff pitch-error RMS differed ~4× between candidate tunes), so a few logged takeoffs are a cheap, quantitative way to choose between tunes that all "feel fine".
+**Refinement (blackbox method):** after swapping to 1750 kV motors jmsweng re-tuned by comparing blackbox traces of the same takeoff+hover under several candidate tunes and picking the one with the least oscillation — ending at **30 / 100 / 200**. Maintainer analysis of those logs confirms the separation is real (takeoff pitch-error RMS differed ~4× between candidate tunes), so a few logged takeoffs are a cheap, quantitative way to choose between tunes that all "feel fine". This method is packaged as a ready-to-run script: [`docs/flight-test-analysis/adrc_tune_score.py`](docs/flight-test-analysis/adrc_tune_score.py) (stdlib-only Python; feed it the CSVs from `blackbox_decode` and it ranks your candidate tunes).
 
 > **Takeoff note:** the rate ESO doesn't model gravity, so on throttle-up there's often a brief (sub-second) oscillation/bounce before it settles — some pilots report this as "unpredictable on arm". `set pid_at_min_throttle = off` (above) helps, and a firm toss-launch avoids it.
 
