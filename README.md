@@ -4,14 +4,25 @@
 
 # Betaflight ADRC Controller (Active Disturbance Rejection Control)
 
+**English** | [Русский](README.ru.md)
+
 This repository implements **Active Disturbance Rejection Control (ADRC)** on Betaflight, completely replacing the traditional PID loop. ADRC acts as a "PID Killer"—providing incredible stability, robust wind resistance, and smooth handling even with uncalibrated parameters, changing propeller sizes, or extreme, unbalanced dynamic payloads.
+
+> ⚠️ **Experimental robustness fixes on this fork — flight testers wanted!**
+> This fork carries a series of small, independent ADRC robustness fixes on top of
+> `Boyyt357/ADRC-betaflight` (anti-windup on the disturbance estimate, saturation-aware
+> observer feedback, ADRC-tuned defaults, zero-throttle observer handling, plus one
+> experimental change). **They are UNTESTED on real hardware.** Each fix is its own commit so
+> you can build with or without any of them (`git revert <sha>`). Details and rationale in
+> [`ADRC_FIXES.md`](ADRC_FIXES.md). If you fly it, **please report in
+> [issue #1 — Call for flight testers](https://github.com/danusha2345/ADRC-betaflight/issues/1)** —
+> what you flew, which commits, and how it behaved. 🙏
 
 ---
 
 ## For more Info
 
-<img width="2752" height="1536" alt="1T" src="https://github.com/user-attachments/assets/0e7b9a59-aff6-4e84-ac83-92dbd45ac3cc" />
-https://youtu.be/BLTQN-Gw7LE
+[![ADRC Betaflight](https://img.youtube.com/vi/BLTQN-Gw7LE/0.jpg)](https://www.youtube.com/watch?v=BLTQN-Gw7LE)
 
 
 
@@ -33,8 +44,112 @@ Instead of standard Proportional, Integral, and Derivative gains, this implement
 | **I** | **Observer Bandwidth** | Controls the speed of the Extended State Observer (ESO). It dictates how fast the controller estimates and cancels external forces (e.g., wind, prop wash). *Note: Setting this too high can amplify gyro noise and heat up motors.* |
 | **D** | **System Gain** | Informs the controller how powerful the motors are based on acceleration and KV rating. Decreasing this increases overall gain (for fast-accelerating motors); increasing it decreases overall gain (for smoother control). |
 
+### Where to enter the values (Betaflight Configurator, PID Tuning tab)
+
+There is no separate "ADRC" screen — you type the ADRC parameters into the **ordinary P / I / D cells** of the PID Tuning tab, per axis, exactly where PID gains normally live:
+
+| Axis | **P** cell → Control Bandwidth (ω_c) | **I** cell → Observer Bandwidth (ω_o) | **D** cell → System Gain (b0 ÷ 10) |
+| :--- | :---: | :---: | :---: |
+| ROLL | 30 | 100 | 200 |
+| PITCH | 30 | 100 | 200 |
+| YAW | 30 | 80 | 200 |
+
+*(example values = the community 5" tune below; the firmware defaults are 10 / 110 / 100 for roll & pitch and 10 / 80 / 100 for yaw — yaw runs a slightly lower observer bandwidth by default)*
+
+Two things to know before you hit Save:
+
+1. **Switch the Simplified Tuning sliders OFF first** (PID Tuning tab → slider mode → OFF / expert mode). If the sliders are active, the Configurator recomputes the P/I/D cells from the sliders on save and silently overwrites your ADRC values. For the same reason, don't touch the *Master multiplier* — under ADRC, scaling all cells together is meaningless.
+2. The other fields keep (or lose) their meaning as follows:
+   - **Feedforward (F)** — unchanged: still the standard Betaflight stick feedforward, applied on top of ADRC. Keep the defaults.
+   - **D Max** — ignored (ADRC reads only the D cell, as System Gain).
+   - **TPA** — effectively inert (it scales the legacy Kp/Kd coefficients, which ADRC does not use).
+   - **Anti-gravity / I-term relax / I-term rotation** — legacy PID helpers; ADRC recomputes its I-term from the observer every loop, so they don't apply (the anti-gravity P-boost is explicitly disabled in this fork — fix #7a).
+
+CLI equivalent, if you prefer it over the GUI: `set p_roll = 30`, `set i_roll = 100`, `set d_roll = 200` (same for `_pitch` / `_yaw`), then `save`.
+
+It is **highly recommended** to disable PID at minimum throttle in case the initial ADRC parameters are incorrect for your drone — otherwise it may behave unpredictably on arm while you adjust parameters. In the Betaflight command line interface (CLI) run:
+```
+set pid_at_min_throttle = off
+```
+
+### Example Parameters
+| Drone type | Control Bandwidth (P) | Observer Bandwidth (I) | System Gain (D) |
+| :--- | :---: | :---: | :---: |
+| 10" drone (author's video) | 10 | 50 | 20 |
+| 5" drone (jmsweng, 2300 kV) | 40 | 160 | 200 |
+| 5" drone (jmsweng, 1750 kV) | 40 | 160 | 250 |
+| 5" drone (jmsweng, 1750 kV, blackbox-refined) | 30 | 100 | 200 |
+
+### Tuning procedure (community, from @jmsweng)
+A sensible step-by-step instead of guessing, starting from `10 / 50 / 20` (P/I/D):
+1. **System Gain (D):** raise until the quad takes off stably (~70 on a 5"), keep raising until it makes a stuttering noise in hover, then back off ~20%. *(Overestimating b0 is fairly harmless; underestimating causes instability.)*
+2. **Observer Bandwidth (I):** raise until stuttering/chatter appears in hover, then back off ~20%. *(Too high and the observer starts tracking gyro noise.)*
+3. **Control Bandwidth (P):** set to ~¼ of the Observer Bandwidth (the wo ≈ 3–5×wc rule of thumb).
+
+Example end state on a 5" (640 g, DAKEFPVF405, 4S, 2300 kV, Gemfan Hurricane 51433-3): **40 / 160 / 200** — in tests this resisted a leaf-blower and being hit with a stick mid-air, and flew with 20–40% of AUW hung off one motor arm. On faster/lighter setups scale System Gain roughly with kV·mass. The System Gain (D) input maxes out at **255** in this fork (raised from 250); if you need more, chattering usually means the Observer Bandwidth (I) / gyro filtering needs retuning rather than more gain.
+
+**Refinement (blackbox method):** after swapping to 1750 kV motors jmsweng re-tuned by comparing blackbox traces of the same takeoff+hover under several candidate tunes and picking the one with the least oscillation — ending at **30 / 100 / 200**. Maintainer analysis of those logs confirms the separation is real (takeoff pitch-error RMS differed ~4× between candidate tunes), so a few logged takeoffs are a cheap, quantitative way to choose between tunes that all "feel fine". This method is packaged as a ready-to-run script: [`docs/flight-test-analysis/adrc_tune_score.py`](docs/flight-test-analysis/adrc_tune_score.py) (stdlib-only Python; feed it the CSVs from `blackbox_decode` and it ranks your candidate tunes).
+
+> **Takeoff note:** the rate ESO doesn't model gravity, so on throttle-up there's often a brief (sub-second) oscillation/bounce before it settles — some pilots report this as "unpredictable on arm". `set pid_at_min_throttle = off` (above) helps, and a firm toss-launch avoids it.
+
 ---
 
+## Compiling ADRC-Betaflight
+Compiles exactly like standard Betaflight (full docs [here](https://betaflight.com/docs/category/building)). On a normal x86_64 Linux / macOS / WSL host:
+```
+git clone https://github.com/danusha2345/ADRC-betaflight
+cd ADRC-betaflight
+make arm_sdk_install   # one-time: downloads the pinned arm-none-eabi GCC (13.3.1)
+make configs           # one-time: hydrate the board configs submodule
+make DAKEFPVF405       # build your target — replace DAKEFPVF405 with your board
+```
+The `.hex` lands in `obj/`. (Verified: builds clean for `DAKEFPVF405` / STM32F405 with GCC 13.3.1.)
+
+<details>
+<summary>Building on an ARM host (e.g. Raspberry Pi)</summary>
+
+The toolchain `make arm_sdk_install` fetches is x86_64-only, so on an ARM host use the system toolchain instead. Tested on a Raspberry Pi 3B running Raspbian Trixie 13.5:
+
+1) Install the toolchain
+```
+sudo apt update && sudo apt upgrade
+sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+```
+2) Clone and enter the repo
+```
+git clone https://github.com/danusha2345/ADRC-betaflight
+cd ADRC-betaflight
+```
+3) Comment out the `$(error No toolchain URL defined ...)` line in `mk/tools.mk` (line 43) so the build uses the system toolchain instead of downloading one.
+4) Point the build at the system compiler version
+```
+echo "GCC_REQUIRED_VERSION = $(arm-none-eabi-gcc -dumpversion)" >> mk/local.mk
+```
+5) Hydrate configs and build
+```
+make configs
+make DAKEFPVF405
+```
+</details>
+
+---
+
+## 🧪 Help test these fixes — testers wanted!
+
+This fork's ADRC robustness fixes (see [`ADRC_FIXES.md`](ADRC_FIXES.md)) are **UNTESTED on real hardware** — the code builds clean but has never flown. If you have a craft you can safely test on, please help validate them.
+
+**How to help:**
+1. Build the fork (see *Compiling* above). Each fix is a separate commit, so you can `git revert <sha>` to build with or without any one of them.
+2. Test safely — **props off first**, then an open area away from people.
+3. Report in **[issue #1 — Call for flight testers](https://github.com/danusha2345/ADRC-betaflight/issues/1)**, including:
+   - Craft (size, weight, motors/props, FC target) and your ADRC P/I/D (wc/wo/b0).
+   - Which commits you built with (or "all").
+   - Behavior: arm/spool-up, hover, hard maneuvers, prop wash, wind, recovery after throttle chops, any oscillation or motor heating.
+   - A blackbox log if you can grab one.
+
+Even a quick "flew fine on a 5\" with all fixes" or "got oscillation on yaw" is hugely useful. Thank you! 🙏
+
+---
 
 ## Hardware Issues
 

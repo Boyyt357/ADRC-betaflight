@@ -85,6 +85,18 @@ FAST_DATA_ZERO_INIT pidRuntime_t pidRuntime;
 #define ADRC_B0_SCALE 10.0f
 #define ADRC_B0_FALLBACK 50.0f
 
+// EXPERIMENTAL fix #8 (see ADRC_FIXES.md): while the craft is ground-constrained the plant
+// does not respond to the command (effective b0 = 0), so feeding b0*u into the ESO makes
+// z3 wind toward -b0*u during spool-up and the estimate has to unwind at liftoff — the
+// takeoff bounce seen in blackbox. Until liftoff is detected the b0*u term is therefore
+// not fed to the observer. Liftoff = throttle above ADRC_LIFTOFF_THROTTLE, or any-axis
+// rotation above ADRC_LIFTOFF_GYRO_DPS sustained for ADRC_LIFTOFF_HOLD_S (a toss launch
+// opens it almost instantly). Latched until disarm, so in-flight throttle chops keep the
+// full observer.
+#define ADRC_LIFTOFF_THROTTLE 0.4f
+#define ADRC_LIFTOFF_GYRO_DPS 20.0f
+#define ADRC_LIFTOFF_HOLD_S 0.025f
+
 #if defined(USE_THROTTLE_BOOST)
 FAST_DATA_ZERO_INIT float throttleBoost;
 pt1Filter_t throttleLpf;
@@ -317,6 +329,8 @@ void pidResetIterm(void)
         pidRuntime.adrc_z3[axis] = 0.0f;
         pidRuntime.adrc_lastOutput[axis] = 0.0f;
     }
+    pidRuntime.adrc_liftoff = false;
+    pidRuntime.adrc_gyroActiveS = 0.0f;
 }
 
 #ifdef USE_WING
@@ -1179,6 +1193,24 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
 #endif // USE_CHIRP
 
+    // EXPERIMENTAL fix #8: liftoff detection for the ADRC observer (see defines up top).
+    if (!pidRuntime.adrc_liftoff) {
+        if (mixerGetThrottle() >= ADRC_LIFTOFF_THROTTLE) {
+            pidRuntime.adrc_liftoff = true;
+        } else {
+            const float gyroPeak = fmaxf(fabsf(gyro.gyroADCf[FD_ROLL]),
+                                         fmaxf(fabsf(gyro.gyroADCf[FD_PITCH]), fabsf(gyro.gyroADCf[FD_YAW])));
+            if (gyroPeak > ADRC_LIFTOFF_GYRO_DPS) {
+                pidRuntime.adrc_gyroActiveS += pidRuntime.dT;
+                if (pidRuntime.adrc_gyroActiveS >= ADRC_LIFTOFF_HOLD_S) {
+                    pidRuntime.adrc_liftoff = true;
+                }
+            } else {
+                pidRuntime.adrc_gyroActiveS = 0.0f;
+            }
+        }
+    }
+
     // ----------PID controller----------
     for (flight_dynamics_index_t axis = FD_ROLL; axis <= FD_YAW; ++axis) {
 
@@ -1277,10 +1309,37 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         float error_eso = pidRuntime.adrc_z1[axis] - gyroRate;
         float dt = pidRuntime.dT;
 
-        // Extended State Observer (ESO) Update (Euler forward integration)
+        // Extended State Observer (ESO) Update (Euler forward integration).
+        // EXPERIMENTAL fix #8: on the ground the plant does not respond to the command,
+        // so the observer models b0*u only after liftoff (otherwise z3 winds to -b0*u).
+        const float adrcB0u = pidRuntime.adrc_liftoff ? (b0 * pidRuntime.adrc_lastOutput[axis]) : 0.0f;
         pidRuntime.adrc_z1[axis] += dt * (pidRuntime.adrc_z2[axis] - beta1 * error_eso);
-        pidRuntime.adrc_z2[axis] += dt * (pidRuntime.adrc_z3[axis] + (b0 * pidRuntime.adrc_lastOutput[axis]) - beta2 * error_eso);
+        pidRuntime.adrc_z2[axis] += dt * (pidRuntime.adrc_z3[axis] + adrcB0u - beta2 * error_eso);
         pidRuntime.adrc_z3[axis] += dt * (-beta3 * error_eso);
+
+        // Anti-windup: bound the disturbance estimate so it cannot wind up under
+        // motor/actuator saturation (otherwise recovery from clipping lags while z3 unwinds).
+        // |I term| = |z3 / b0| is capped at the per-axis pidsum limit.
+        const float adrcZ3Limit = b0 * ((axis == FD_YAW) ? PIDSUM_LIMIT_YAW : PIDSUM_LIMIT);
+        pidRuntime.adrc_z3[axis] = constrainf(pidRuntime.adrc_z3[axis], -adrcZ3Limit, adrcZ3Limit);
+
+        // Expose the ESO states to blackbox so testers can actually see the observer.
+        // roll: z1/z2/z3 in [0..2]; pitch: z1/z2/z3 in [3..5]; yaw z3 in [6];
+        // [7] = pitch b0, sign-tagged with the liftoff latch (fix #8): positive = airborne
+        // (b0*u fed to the ESO), negative = still gated on the ground.
+        // z1 = estimated rate (deg/s), z2 = estimated accel, z3 = estimated total disturbance.
+        if (axis == FD_ROLL) {
+            DEBUG_SET(DEBUG_ADRC, 0, lrintf(pidRuntime.adrc_z1[axis]));
+            DEBUG_SET(DEBUG_ADRC, 1, lrintf(pidRuntime.adrc_z2[axis]));
+            DEBUG_SET(DEBUG_ADRC, 2, lrintf(pidRuntime.adrc_z3[axis]));
+        } else if (axis == FD_PITCH) {
+            DEBUG_SET(DEBUG_ADRC, 3, lrintf(pidRuntime.adrc_z1[axis]));
+            DEBUG_SET(DEBUG_ADRC, 4, lrintf(pidRuntime.adrc_z2[axis]));
+            DEBUG_SET(DEBUG_ADRC, 5, lrintf(pidRuntime.adrc_z3[axis]));
+            DEBUG_SET(DEBUG_ADRC, 7, lrintf(pidRuntime.adrc_liftoff ? b0 : -b0));
+        } else { // FD_YAW
+            DEBUG_SET(DEBUG_ADRC, 6, lrintf(pidRuntime.adrc_z3[axis]));
+        }
 
         // Control Law (Virtual PD)
         float kp = wc * wc;
@@ -1341,13 +1400,19 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         }
 #endif
 
-        // Add P boost from antiGravity when sticks are close to zero
+        // Anti-gravity P boost (legacy PID heuristic): DISABLED under ADRC.
+        // Anti-gravity raises P during throttle transients to fight throttle-sag
+        // torque. Under this ADRC controller the observer's disturbance estimate
+        // (z3, exposed as the I channel = -z3/b0) already rejects that torque, so
+        // multiplying the tuned virtual stiffness (kp = wc^2) by the boost only
+        // injects a transient overshoot exactly at spool-up/takeoff. The boost is
+        // still computed and logged so it can be studied; to restore the classic
+        // behavior, revert this commit (re-add `pidData[axis].P *= antiGravityPBoost`).
         if (axis != FD_YAW) {
             float agSetpointAttenuator = fabsf(currentPidSetpoint) / 50.0f;
             agSetpointAttenuator = MAX(agSetpointAttenuator, 1.0f);
             // attenuate effect if turning more than 50 deg/s, half at 100 deg/s
             const float antiGravityPBoost = 1.0f + (pidRuntime.antiGravityThrottleD / agSetpointAttenuator) * pidRuntime.antiGravityPGain;
-            pidData[axis].P *= antiGravityPBoost;
             if (axis == FD_PITCH) {
                 DEBUG_SET(DEBUG_ANTI_GRAVITY, 3, lrintf(antiGravityPBoost * 1000));
             }
@@ -1368,8 +1433,11 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             pidData[axis].Sum = pidSum;
         }
 
-        // Save actual control output for next iteration of ADRC observer
-        pidRuntime.adrc_lastOutput[axis] = pidData[axis].Sum;
+        // Save actual control output for next iteration of ADRC observer.
+        // Clamp to the per-axis pidsum limit so the ESO is fed the command that can
+        // actually reach the plant, instead of absorbing mixer clipping as a fake disturbance.
+        const float adrcOutLimit = (axis == FD_YAW) ? PIDSUM_LIMIT_YAW : PIDSUM_LIMIT;
+        pidRuntime.adrc_lastOutput[axis] = constrainf(pidData[axis].Sum, -adrcOutLimit, adrcOutLimit);
     }
 
 #ifdef USE_WING
@@ -1400,8 +1468,15 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             pidRuntime.adrc_z3[axis] = 0.0f;
             pidRuntime.adrc_lastOutput[axis] = 0.0f;
         }
+        pidRuntime.adrc_liftoff = false;
+        pidRuntime.adrc_gyroActiveS = 0.0f;
     } else if (pidRuntime.zeroThrottleItermReset) {
-        pidResetIterm();
+        // Keep the ESO running at zero throttle (do not wipe z1/z2/z3) so the disturbance
+        // estimate is maintained instead of restarting from zero on every spool-up.
+        // Only the legacy I accumulator is cleared (ADRC recomputes I = -z3/b0 each loop).
+        for (int axis = 0; axis < 3; axis++) {
+            pidData[axis].I = 0.0f;
+        }
     }
 }
 
