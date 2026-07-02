@@ -55,6 +55,7 @@ set pid_at_min_throttle = off
 | 10" drone (author's video) | 10 | 50 | 20 |
 | 5" drone (jmsweng, 2300 kV) | 40 | 160 | 200 |
 | 5" drone (jmsweng, 1750 kV) | 40 | 160 | 250 |
+| 5" drone (jmsweng, 1750 kV, blackbox-refined) | 30 | 100 | 200 |
 
 ### Tuning procedure (community, from @jmsweng)
 A sensible step-by-step instead of guessing, starting from `10 / 50 / 20` (P/I/D):
@@ -63,6 +64,8 @@ A sensible step-by-step instead of guessing, starting from `10 / 50 / 20` (P/I/D
 3. **Control Bandwidth (P):** set to ~¼ of the Observer Bandwidth (the wo ≈ 3–5×wc rule of thumb).
 
 Example end state on a 5" (640 g, DAKEFPVF405, 4S, 2300 kV, Gemfan Hurricane 51433-3): **40 / 160 / 200** — in tests this resisted a leaf-blower and being hit with a stick mid-air, and flew with 20–40% of AUW hung off one motor arm. On faster/lighter setups scale System Gain roughly with kV·mass. The System Gain (D) input maxes out at **255** in this fork (raised from 250); if you need more, chattering usually means the Observer Bandwidth (I) / gyro filtering needs retuning rather than more gain.
+
+**Refinement (blackbox method):** after swapping to 1750 kV motors jmsweng re-tuned by comparing blackbox traces of the same takeoff+hover under several candidate tunes and picking the one with the least oscillation — ending at **30 / 100 / 200**. Maintainer analysis of those logs confirms the separation is real (takeoff pitch-error RMS differed ~4× between candidate tunes), so a few logged takeoffs are a cheap, quantitative way to choose between tunes that all "feel fine".
 
 > **Takeoff note:** the rate ESO doesn't model gravity, so on throttle-up there's often a brief (sub-second) oscillation/bounce before it settles — some pilots report this as "unpredictable on arm". `set pid_at_min_throttle = off` (above) helps, and a firm toss-launch avoids it.
 
