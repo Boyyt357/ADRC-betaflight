@@ -40,7 +40,7 @@ else ifeq ($(OSFAMILY), windows)
   ARM_SDK_URL := https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi.zip
   DL_CHECKSUM = 39d9882ca0eb475e81170ae826c1435d
 else
-  $(error No toolchain URL defined for $(OSFAMILY)-$(ARCHFAMILY))
+#  $(error No toolchain URL defined for $(OSFAMILY)-$(ARCHFAMILY))
 endif
 
 ARM_SDK_FILE := $(notdir $(ARM_SDK_URL))

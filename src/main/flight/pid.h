@@ -39,7 +39,12 @@
 #define PIDSUM_LIMIT_MIN            100
 #define PIDSUM_LIMIT_MAX            1000
 
-#define PID_GAIN_MAX 250
+// In this ADRC fork the P/I/D gain bytes are reinterpreted as ADRC tuning
+// parameters (P=wc, I=wo, D=b0/ADRC_B0_SCALE), so there is no reason to keep
+// the legacy 250 safety margin below the byte ceiling. Allow the full uint8_t
+// range. 255 is the HARD limit of the uint8_t pid[].D field: going higher
+// would require widening the field, which breaks MSP/blackbox wire format.
+#define PID_GAIN_MAX 255
 #define F_GAIN_MAX 1000
 
 // Scaling factors for Pids for better tunable range in configurator for betaflight pid controller. The scaling is based on legacy pid controller or previous float
@@ -61,9 +66,13 @@
 #define ITERM_ACCELERATOR_GAIN_OFF 0
 #define ITERM_ACCELERATOR_GAIN_MAX 250
 
-#define PID_ROLL_DEFAULT  { 45, 80, 30, 120, 0 }
-#define PID_PITCH_DEFAULT { 47, 84, 34, 125, 0 }
-#define PID_YAW_DEFAULT   { 45, 80,  0, 120, 0 }
+// ADRC defaults: P = control bandwidth wc, I = observer bandwidth wo, D = system gain b0 (x10).
+// Re-derived for ADRC instead of reusing stock Betaflight PID integers. Values follow the
+// community-proven 5" tune (wc=10, wo=110, b0=100) and keep wo/wc within the ~3..10 rule.
+// Yaw gets an explicit b0 instead of D=0 (which silently fell through to the 500 fallback).
+#define PID_ROLL_DEFAULT  { 10, 110, 100, 120, 0 }
+#define PID_PITCH_DEFAULT { 10, 110, 100, 125, 0 }
+#define PID_YAW_DEFAULT   { 10,  80, 100, 120, 0 }
 #define D_MAX_DEFAULT     { 40, 46, 0 }
 
 #define DTERM_LPF1_DYN_MIN_HZ_DEFAULT 75
@@ -327,6 +336,8 @@ typedef struct pidProfile_s {
     uint16_t chirp_frequency_start_deci_hz; // start frequency in units of 0.1 hz
     uint16_t chirp_frequency_end_deci_hz;   // end frequency in units of 0.1 hz
     uint8_t chirp_time_seconds;             // excitation time
+
+    uint8_t adrc_b0_scale;                  // ADRC System-Gain multiplier: b0 = D * adrc_b0_scale (default 10; raise on high thrust/weight builds where D maxes out)
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);
@@ -533,6 +544,8 @@ typedef struct pidRuntime_s {
     float adrc_z2[XYZ_AXIS_COUNT];
     float adrc_z3[XYZ_AXIS_COUNT];
     float adrc_lastOutput[XYZ_AXIS_COUNT];
+    bool adrc_liftoff;        // latched once per arm cycle: craft has left the ground
+    float adrc_gyroActiveS;   // seconds of sustained gyro activity (liftoff detector)
 } pidRuntime_t;
 
 extern pidRuntime_t pidRuntime;
