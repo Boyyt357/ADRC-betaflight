@@ -34,7 +34,8 @@ Instead of standard Proportional, Integral, and Derivative gains, this implement
 | **D** | **System Gain** | Informs the controller how powerful the motors are based on acceleration and KV rating. Decreasing this increases overall gain (for fast-accelerating motors); increasing it decreases overall gain (for smoother control). |
 
 ---
-
+## Support
+https://www.patreon.com/c/EngineeringRobotic
 
 ## Hardware Issues
 
